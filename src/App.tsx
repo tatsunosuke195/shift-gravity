@@ -1,8 +1,43 @@
-// Shift the Gravity App.tsx v1
+// Shift the Gravity App.tsx v2
 // 2026-03-29
-// 変更点: 初版試作。横向き1ステージ、長押し推力、傾きで重力方向が少しずれる操作、障害物/ゴール、実機調整しやすい定数群を実装。
+// 変更点: TypeScript ビルド通過を優先して型を整理。横向き1ステージ、長押し推力、傾きで重力方向が少しずれる操作、障害物/ゴール、PC向け傾き代用スライダーを実装。
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+
+// ===== TYPES =====
+type GamePhase = "idle" | "playing" | "lost" | "cleared";
+type PermissionState =
+  | "checking"
+  | "needs-request"
+  | "granted"
+  | "denied"
+  | "unsupported";
+
+type Vec2 = {
+  x: number;
+  y: number;
+};
+
+type Rect = {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+};
+
+type Player = {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  size: number;
+};
+
+type MotionPermissionResult = "granted" | "denied";
+
+type DeviceOrientationConstructorWithPermission = typeof DeviceOrientationEvent & {
+  requestPermission?: () => Promise<MotionPermissionResult>;
+};
 
 // ===== CONSTANTS =====
 const WORLD_WIDTH = 1600;
@@ -11,10 +46,10 @@ const WORLD_HEIGHT = 900;
 const PLAYER_SIZE = 24;
 const PLAYER_HITBOX_SCALE = 0.84;
 
-const START_POSITION = { x: 140, y: 760 };
-const GOAL_RECT = { x: 1400, y: 84, w: 112, h: 112 };
+const START_POSITION: Vec2 = { x: 140, y: 760 };
+const GOAL_RECT: Rect = { x: 1400, y: 84, w: 112, h: 112 };
 
-const STAGE_OBSTACLES = [
+const STAGE_OBSTACLES: Rect[] = [
   { x: 320, y: 250, w: 90, h: 470 },
   { x: 520, y: 250, w: 280, h: 80 },
   { x: 760, y: 390, w: 90, h: 350 },
@@ -46,19 +81,15 @@ const HUD_PANEL = "rgba(16, 24, 38, 0.86)";
 const HUD_BORDER = "rgba(255,255,255,0.12)";
 
 // ===== HELPERS =====
-function clamp(value, min, max) {
+function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-function dot(a, b) {
-  return a.x * b.x + a.y * b.y;
-}
-
-function dotVelocity(player, axis) {
+function dotVelocity(player: Player, axis: Vec2): number {
   return player.vx * axis.x + player.vy * axis.y;
 }
 
-function rectsOverlap(a, b) {
+function rectsOverlap(a: Rect, b: Rect): boolean {
   return (
     a.x < b.x + b.w &&
     a.x + a.w > b.x &&
@@ -67,7 +98,7 @@ function rectsOverlap(a, b) {
   );
 }
 
-function getPlayerHitbox(player) {
+function getPlayerHitbox(player: Player): Rect {
   const hitSize = player.size * PLAYER_HITBOX_SCALE;
   const inset = (player.size - hitSize) * 0.5;
   return {
@@ -78,25 +109,41 @@ function getPlayerHitbox(player) {
   };
 }
 
-function getOrientationType() {
+function getDeviceOrientationCtor(): DeviceOrientationConstructorWithPermission | undefined {
+  if (typeof window === "undefined") return undefined;
+  return (window as Window & {
+    DeviceOrientationEvent?: DeviceOrientationConstructorWithPermission;
+  }).DeviceOrientationEvent;
+}
+
+function getLegacyOrientation(): number {
+  if (typeof window === "undefined") return 90;
+  return (window as Window & { orientation?: number }).orientation ?? 90;
+}
+
+function getOrientationType(): string {
   if (typeof window === "undefined") return "landscape-primary";
 
   if (window.screen?.orientation?.type) {
     return window.screen.orientation.type;
   }
 
-  const legacyAngle = typeof window.orientation === "number" ? window.orientation : 90;
+  const legacyAngle = getLegacyOrientation();
   return legacyAngle === -90 ? "landscape-secondary" : "landscape-primary";
 }
 
-function readRawTiltDegrees(event) {
+function readRawTiltDegrees(event: DeviceOrientationEvent): number {
   const gamma = Number.isFinite(event.gamma) ? event.gamma : 0;
   const type = getOrientationType();
   const sign = type === "landscape-secondary" ? -1 : 1;
   return gamma * sign;
 }
 
-function resizeCanvasToDisplaySize(canvas) {
+function resizeCanvasToDisplaySize(canvas: HTMLCanvasElement): {
+  width: number;
+  height: number;
+  dpr: number;
+} {
   const dpr = window.devicePixelRatio || 1;
   const rect = canvas.getBoundingClientRect();
   const width = Math.round(rect.width * dpr);
@@ -110,7 +157,7 @@ function resizeCanvasToDisplaySize(canvas) {
   return { width, height, dpr };
 }
 
-function makeInitialPlayer() {
+function makeInitialPlayer(): Player {
   return {
     x: START_POSITION.x,
     y: START_POSITION.y,
@@ -120,36 +167,36 @@ function makeInitialPlayer() {
   };
 }
 
-function formatTiltText(value) {
+function formatTiltText(value: number): string {
   return `${value >= 0 ? "+" : ""}${value.toFixed(1)}°`;
 }
 
+function isDesktopLike(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+}
+
 // ===== MAIN APP =====
-export default function ShiftTheGravityApp() {
-  const canvasRef = useRef(null);
-  const containerRef = useRef(null);
+export default function ShiftTheGravityApp(): React.JSX.Element {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  const [gamePhase, setGamePhase] = useState("idle");
-  const [permissionState, setPermissionState] = useState("checking");
-  const [isLandscape, setIsLandscape] = useState(true);
-  const [manualTilt, setManualTilt] = useState(0);
-  const [debugTilt, setDebugTilt] = useState(0);
+  const [gamePhase, setGamePhase] = useState<GamePhase>("idle");
+  const [permissionState, setPermissionState] = useState<PermissionState>("checking");
+  const [isLandscape, setIsLandscape] = useState<boolean>(true);
+  const [manualTilt, setManualTilt] = useState<number>(0);
+  const [debugTilt, setDebugTilt] = useState<number>(0);
+  const [showManualTiltFallback, setShowManualTiltFallback] = useState<boolean>(false);
 
-  const phaseRef = useRef("idle");
-  const pointerActiveRef = useRef(false);
-  const neutralTiltRef = useRef(0);
-  const liveTiltRef = useRef(0);
-  const loopTimeRef = useRef(0);
-  const trailRef = useRef([]);
-  const playerRef = useRef(makeInitialPlayer());
-  const latestDebugRef = useRef(0);
+  const phaseRef = useRef<GamePhase>("idle");
+  const pointerActiveRef = useRef<boolean>(false);
+  const neutralTiltRef = useRef<number>(0);
+  const liveTiltRef = useRef<number>(0);
+  const loopTimeRef = useRef<number>(0);
+  const trailRef = useRef<Vec2[]>([]);
+  const playerRef = useRef<Player>(makeInitialPlayer());
+  const latestDebugRef = useRef<number>(0);
 
-  const supportsOrientation = useMemo(() => {
-    if (typeof window === "undefined") return false;
-    return "DeviceOrientationEvent" in window;
-  }, []);
-
-  const showManualTiltFallback = permissionState === "unsupported" || permissionState === "denied";
+  const supportsOrientation = typeof window !== "undefined" && !!getDeviceOrientationCtor();
   const canStart = isLandscape && (permissionState === "granted" || showManualTiltFallback);
 
   useEffect(() => {
@@ -176,28 +223,42 @@ export default function ShiftTheGravityApp() {
   useEffect(() => {
     if (!supportsOrientation) {
       setPermissionState("unsupported");
+      setShowManualTiltFallback(true);
       return;
     }
 
-    const hasRequestPermission =
-      typeof window.DeviceOrientationEvent?.requestPermission === "function";
+    const orientationCtor = getDeviceOrientationCtor();
+    const hasRequestPermission = typeof orientationCtor?.requestPermission === "function";
 
     if (hasRequestPermission) {
       setPermissionState("needs-request");
+      setShowManualTiltFallback(false);
     } else {
       setPermissionState("granted");
+      setShowManualTiltFallback(isDesktopLike());
     }
   }, [supportsOrientation]);
 
   useEffect(() => {
     if (permissionState !== "granted") return;
 
-    const handleOrientation = (event) => {
+    let sawOrientationEvent = false;
+
+    const handleOrientation = (event: DeviceOrientationEvent) => {
+      sawOrientationEvent = true;
+      setShowManualTiltFallback(false);
       liveTiltRef.current = readRawTiltDegrees(event);
     };
 
+    const fallbackTimer = window.setTimeout(() => {
+      if (!sawOrientationEvent && isDesktopLike()) {
+        setShowManualTiltFallback(true);
+      }
+    }, 1200);
+
     window.addEventListener("deviceorientation", handleOrientation, true);
     return () => {
+      window.clearTimeout(fallbackTimer);
       window.removeEventListener("deviceorientation", handleOrientation, true);
     };
   }, [permissionState]);
@@ -205,7 +266,7 @@ export default function ShiftTheGravityApp() {
   useEffect(() => {
     let rafId = 0;
 
-    const stepAndDraw = (timestamp) => {
+    const stepAndDraw = (timestamp: number) => {
       if (!loopTimeRef.current) {
         loopTimeRef.current = timestamp;
       }
@@ -225,59 +286,68 @@ export default function ShiftTheGravityApp() {
     return () => window.cancelAnimationFrame(rafId);
   }, [manualTilt, permissionState]);
 
-  function getCurrentTiltDegrees() {
-    return permissionState === "granted" ? liveTiltRef.current : manualTilt;
+  function getCurrentTiltDegrees(): number {
+    return permissionState === "granted" && !showManualTiltFallback
+      ? liveTiltRef.current
+      : manualTilt;
   }
 
-  function resetStage() {
+  function resetStage(): void {
     playerRef.current = makeInitialPlayer();
     trailRef.current = [];
     loopTimeRef.current = 0;
   }
 
-  function startRun() {
+  function startRun(): void {
     resetStage();
     neutralTiltRef.current = getCurrentTiltDegrees();
     setGamePhase("playing");
   }
 
-  function finishRun(nextPhase) {
+  function finishRun(nextPhase: Extract<GamePhase, "lost" | "cleared">): void {
     if (phaseRef.current !== "playing") return;
     pointerActiveRef.current = false;
     setGamePhase(nextPhase);
   }
 
-  async function handleEnableTilt() {
+  async function handleEnableTilt(): Promise<void> {
     if (!supportsOrientation) {
       setPermissionState("unsupported");
+      setShowManualTiltFallback(true);
       return;
     }
 
     try {
-      const requestPermission = window.DeviceOrientationEvent?.requestPermission;
+      const orientationCtor = getDeviceOrientationCtor();
+      const requestPermission = orientationCtor?.requestPermission;
 
       if (typeof requestPermission === "function") {
         const result = await requestPermission();
-        setPermissionState(result === "granted" ? "granted" : "denied");
+        const granted = result === "granted";
+        setPermissionState(granted ? "granted" : "denied");
+        setShowManualTiltFallback(!granted && isDesktopLike());
       } else {
         setPermissionState("granted");
+        setShowManualTiltFallback(isDesktopLike());
       }
-    } catch (error) {
+    } catch {
       setPermissionState("denied");
+      setShowManualTiltFallback(true);
     }
   }
 
-  function beginThrust(event) {
+  function beginThrust(event: React.PointerEvent<HTMLDivElement>): void {
     if (phaseRef.current !== "playing") return;
-    if (event.target.closest("button")) return;
+    const target = event.target as HTMLElement | null;
+    if (target?.closest("button")) return;
     pointerActiveRef.current = true;
   }
 
-  function endThrust() {
+  function endThrust(): void {
     pointerActiveRef.current = false;
   }
 
-  function simulateGame(dt) {
+  function simulateGame(dt: number): void {
     const player = playerRef.current;
     const steps = Math.max(1, Math.ceil(dt / (1 / 120)));
     const stepDt = dt / steps;
@@ -288,11 +358,11 @@ export default function ShiftTheGravityApp() {
       const gravityRotation =
         (clampedInputDeg / MAX_INPUT_TILT_DEG) * MAX_GRAVITY_ROTATION_RAD;
 
-      const down = {
+      const down: Vec2 = {
         x: Math.sin(gravityRotation),
         y: Math.cos(gravityRotation),
       };
-      const side = { x: down.y, y: -down.x };
+      const side: Vec2 = { x: down.y, y: -down.x };
 
       const thrustMultiplier = pointerActiveRef.current ? 1 : 0;
       const ax = down.x * GRAVITY - down.x * THRUST * thrustMultiplier;
@@ -333,7 +403,7 @@ export default function ShiftTheGravityApp() {
       }
 
       const hitbox = getPlayerHitbox(player);
-      const hitObstacle = STAGE_OBSTACLES.some((obstacle) => rectsOverlap(hitbox, obstacle));
+      const hitObstacle = STAGE_OBSTACLES.some((obstacle: Rect) => rectsOverlap(hitbox, obstacle));
       if (hitObstacle) {
         finishRun("lost");
         return;
@@ -351,7 +421,7 @@ export default function ShiftTheGravityApp() {
     }
   }
 
-  function drawScene() {
+  function drawScene(): void {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -398,7 +468,7 @@ export default function ShiftTheGravityApp() {
     ctx.strokeRect(GOAL_RECT.x, GOAL_RECT.y, GOAL_RECT.w, GOAL_RECT.h);
     ctx.restore();
 
-    STAGE_OBSTACLES.forEach((obstacle) => {
+    STAGE_OBSTACLES.forEach((obstacle: Rect) => {
       ctx.fillStyle = OBSTACLE_FILL;
       ctx.strokeStyle = OBSTACLE_STROKE;
       ctx.lineWidth = 3;
@@ -407,7 +477,7 @@ export default function ShiftTheGravityApp() {
     });
 
     const trail = trailRef.current;
-    trail.forEach((point, index) => {
+    trail.forEach((point: Vec2, index: number) => {
       const ratio = (index + 1) / trail.length;
       const size = 5 + ratio * 6;
       ctx.fillStyle = PLAYER_TRAIL_COLOR;
@@ -437,6 +507,8 @@ export default function ShiftTheGravityApp() {
       ? "傾き許可が取れなかったため、下のスライダーで傾きを代用できます。"
       : permissionState === "unsupported"
       ? "この環境では傾きセンサーが使えないため、下のスライダーで確認できます。"
+      : showManualTiltFallback
+      ? "この環境では実センサー入力が来ていないため、下のスライダーで確認できます。"
       : "";
 
   return (
@@ -446,7 +518,7 @@ export default function ShiftTheGravityApp() {
           <div className="mb-3 flex items-center justify-between gap-3 text-xs text-white/70 md:text-sm">
             <div>
               <span className="font-semibold text-white">Shift the gravity</span>
-              <span className="ml-2">試作版 v1</span>
+              <span className="ml-2">試作版 v2</span>
             </div>
             <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
               tilt {formatTiltText(debugTilt)}
@@ -454,7 +526,6 @@ export default function ShiftTheGravityApp() {
           </div>
 
           <div
-            ref={containerRef}
             className="relative overflow-hidden rounded-3xl border border-white/10 bg-slate-950 shadow-2xl"
             style={{ aspectRatio: "16 / 9", touchAction: "none", userSelect: "none" }}
             onPointerDown={beginThrust}
@@ -465,12 +536,18 @@ export default function ShiftTheGravityApp() {
             <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
 
             <div className="pointer-events-none absolute left-4 top-4 right-4 flex items-start justify-between gap-3">
-              <div className="rounded-2xl border px-3 py-2 text-xs md:text-sm" style={{ background: HUD_PANEL, borderColor: HUD_BORDER }}>
+              <div
+                className="rounded-2xl border px-3 py-2 text-xs md:text-sm"
+                style={{ background: HUD_PANEL, borderColor: HUD_BORDER }}
+              >
                 <div className="font-semibold text-white">操作</div>
                 <div className="mt-1 text-white/80">長押しで推力 / 離すと落下</div>
                 <div className="text-white/80">端末を傾けると重力方向が少しずれます</div>
               </div>
-              <div className="rounded-2xl border px-3 py-2 text-right text-xs md:text-sm" style={{ background: HUD_PANEL, borderColor: HUD_BORDER }}>
+              <div
+                className="rounded-2xl border px-3 py-2 text-right text-xs md:text-sm"
+                style={{ background: HUD_PANEL, borderColor: HUD_BORDER }}
+              >
                 <div className="font-semibold text-white">状態</div>
                 <div className="mt-1 text-white/80">
                   {gamePhase === "playing"
@@ -532,7 +609,9 @@ export default function ShiftTheGravityApp() {
               <div className="absolute inset-0 flex items-center justify-center bg-black/44 px-6 text-center">
                 <div className="pointer-events-auto w-full max-w-md rounded-3xl border border-white/10 bg-slate-950/92 p-6 shadow-2xl md:p-8">
                   <div className="text-2xl font-semibold md:text-3xl">FAILED</div>
-                  <p className="mt-3 text-sm leading-6 text-white/75">障害物か画面端に触れました。もう一度試せます。</p>
+                  <p className="mt-3 text-sm leading-6 text-white/75">
+                    障害物か画面端に触れました。もう一度試せます。
+                  </p>
                   <div className="mt-6">
                     <button
                       className="rounded-2xl border border-white/20 bg-white/10 px-6 py-3 text-sm font-medium text-white transition hover:bg-white/15"
@@ -549,7 +628,9 @@ export default function ShiftTheGravityApp() {
               <div className="absolute inset-0 flex items-center justify-center bg-black/44 px-6 text-center">
                 <div className="pointer-events-auto w-full max-w-md rounded-3xl border border-emerald-300/20 bg-slate-950/92 p-6 shadow-2xl md:p-8">
                   <div className="text-2xl font-semibold text-emerald-300 md:text-3xl">Good Job</div>
-                  <p className="mt-3 text-sm leading-6 text-white/75">初版ステージをクリアしました。今は同じステージを再プレイできます。</p>
+                  <p className="mt-3 text-sm leading-6 text-white/75">
+                    初版ステージをクリアしました。今は同じステージを再プレイできます。
+                  </p>
                   <div className="mt-6 flex items-center justify-center gap-3">
                     <button
                       className="rounded-2xl border border-white/20 bg-white/10 px-6 py-3 text-sm font-medium text-white transition hover:bg-white/15"
@@ -578,7 +659,9 @@ export default function ShiftTheGravityApp() {
                     PCプレビューや傾き未許可時は、ここで重力方向のずれを確認できます。
                   </div>
                 </div>
-                <div className="text-sm text-white/70">{formatTiltText(manualTilt - neutralTiltRef.current)}</div>
+                <div className="text-sm text-white/70">
+                  {formatTiltText(manualTilt - neutralTiltRef.current)}
+                </div>
               </div>
               <input
                 className="mt-4 w-full"
@@ -587,7 +670,9 @@ export default function ShiftTheGravityApp() {
                 max={30}
                 step={0.1}
                 value={manualTilt}
-                onChange={(event) => setManualTilt(Number(event.target.value))}
+                onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+                  setManualTilt(Number(event.target.value))
+                }
               />
             </div>
           )}
@@ -611,3 +696,4 @@ export default function ShiftTheGravityApp() {
     </div>
   );
 }
+
