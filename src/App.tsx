@@ -1,6 +1,7 @@
-// Shift the Gravity App.tsx v2
+
+// Shift the Gravity App.tsx v3
 // 2026-03-29
-// 変更点: TypeScript ビルド通過を優先して型を整理。横向き1ステージ、長押し推力、傾きで重力方向が少しずれる操作、障害物/ゴール、PC向け傾き代用スライダーを実装。
+// 変更点: 実機フィードバックを反映。傾き感度を上げ、傾き方向を補正し、上昇時と落下時で横ズレ方向が揃うように修正。横向きスマホで収まりやすい画面サイズに調整し、長押し時の選択/コピーメニューも抑制。
 
 import React, { useEffect, useRef, useState } from "react";
 
@@ -61,12 +62,13 @@ const STAGE_OBSTACLES: Rect[] = [
 // --- ここが実機で一番触る場所 ---
 const GRAVITY = 1040;
 const THRUST = 1360;
-const MAX_RISE_SPEED = 760;
+const MAX_RISE_SPEED = 820;
 const MAX_FALL_SPEED = 980;
-const MAX_SIDE_SPEED = 560;
-const LINEAR_DAMPING = 1.15;
-const MAX_INPUT_TILT_DEG = 30;
-const MAX_GRAVITY_ROTATION_RAD = 0.42;
+const MAX_SIDE_SPEED = 760;
+const LINEAR_DAMPING = 1.08;
+const MAX_INPUT_TILT_DEG = 18;
+const MAX_GRAVITY_ROTATION_RAD = 0.82;
+const TILT_DIRECTION = -1;
 
 const BG_COLOR = "#0b0f14";
 const FIELD_COLOR = "#101826";
@@ -136,7 +138,7 @@ function readRawTiltDegrees(event: DeviceOrientationEvent): number {
   const gamma = Number.isFinite(event.gamma) ? event.gamma : 0;
   const type = getOrientationType();
   const sign = type === "landscape-secondary" ? -1 : 1;
-  return gamma * sign;
+  return gamma * sign * TILT_DIRECTION;
 }
 
 function resizeCanvasToDisplaySize(canvas: HTMLCanvasElement): {
@@ -198,6 +200,26 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
 
   const supportsOrientation = typeof window !== "undefined" && !!getDeviceOrientationCtor();
   const canStart = isLandscape && (permissionState === "granted" || showManualTiltFallback);
+
+  const screenUp: Vec2 = { x: 0, y: -1 };
+  const rootStyle: React.CSSProperties = {
+    minHeight: "100dvh",
+    height: "100dvh",
+    overflow: "hidden",
+    overscrollBehavior: "none",
+    background: "#000",
+  };
+  const gameFrameStyle: React.CSSProperties = {
+    aspectRatio: "16 / 9",
+    touchAction: "none",
+    userSelect: "none",
+    WebkitUserSelect: "none",
+    WebkitTouchCallout: "none",
+    WebkitTapHighlightColor: "transparent",
+    height: "calc(100dvh - 44px)",
+    width: "auto",
+    maxWidth: "100%",
+  };
 
   useEffect(() => {
     phaseRef.current = gamePhase;
@@ -337,10 +359,12 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
   }
 
   function beginThrust(event: React.PointerEvent<HTMLDivElement>): void {
+    event.preventDefault();
     if (phaseRef.current !== "playing") return;
     const target = event.target as HTMLElement | null;
     if (target?.closest("button")) return;
     pointerActiveRef.current = true;
+    window.getSelection()?.removeAllRanges();
   }
 
   function endThrust(): void {
@@ -365,8 +389,8 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
       const side: Vec2 = { x: down.y, y: -down.x };
 
       const thrustMultiplier = pointerActiveRef.current ? 1 : 0;
-      const ax = down.x * GRAVITY - down.x * THRUST * thrustMultiplier;
-      const ay = down.y * GRAVITY - down.y * THRUST * thrustMultiplier;
+      const ax = down.x * GRAVITY + screenUp.x * THRUST * thrustMultiplier;
+      const ay = down.y * GRAVITY + screenUp.y * THRUST * thrustMultiplier;
 
       player.vx += ax * stepDt;
       player.vy += ay * stepDt;
@@ -512,188 +536,171 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
       : "";
 
   return (
-    <div className="min-h-screen w-full bg-black text-white">
-      <div className="mx-auto flex min-h-screen max-w-7xl items-center justify-center p-4 md:p-6">
-        <div className="w-full">
-          <div className="mb-3 flex items-center justify-between gap-3 text-xs text-white/70 md:text-sm">
-            <div>
-              <span className="font-semibold text-white">Shift the gravity</span>
-              <span className="ml-2">試作版 v2</span>
+    <div className="w-full bg-black text-white" style={rootStyle}>
+      <div className="mx-auto flex h-full max-w-7xl flex-col items-center justify-center p-2 md:p-4">
+        <div className="mb-2 flex w-full items-center justify-between gap-3 px-1 text-[11px] text-white/70 md:mb-3 md:text-sm">
+          <div>
+            <span className="font-semibold text-white">Shift the gravity</span>
+            <span className="ml-2">試作版 v3</span>
+          </div>
+          <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
+            tilt {formatTiltText(debugTilt)}
+          </div>
+        </div>
+
+        <div
+          className="relative overflow-hidden rounded-3xl border border-white/10 bg-slate-950 shadow-2xl"
+          style={gameFrameStyle}
+          onPointerDown={beginThrust}
+          onPointerUp={endThrust}
+          onPointerCancel={endThrust}
+          onPointerLeave={endThrust}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
+
+          <div className="pointer-events-none absolute left-2 top-2 right-2 flex items-start justify-between gap-2 md:left-4 md:top-4 md:right-4 md:gap-3">
+            <div
+              className="rounded-2xl border px-2 py-1.5 text-[10px] md:px-3 md:py-2 md:text-sm"
+              style={{ background: HUD_PANEL, borderColor: HUD_BORDER }}
+            >
+              <div className="font-semibold text-white">操作</div>
+              <div className="mt-1 text-white/80">長押しで推力 / 離すと落下</div>
+              <div className="text-white/80">端末を傾けると重力方向が少しずれます</div>
             </div>
-            <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
-              tilt {formatTiltText(debugTilt)}
+            <div
+              className="rounded-2xl border px-2 py-1.5 text-right text-[10px] md:px-3 md:py-2 md:text-sm"
+              style={{ background: HUD_PANEL, borderColor: HUD_BORDER }}
+            >
+              <div className="font-semibold text-white">状態</div>
+              <div className="mt-1 text-white/80">
+                {gamePhase === "playing"
+                  ? "Playing"
+                  : gamePhase === "lost"
+                  ? "FAILED"
+                  : gamePhase === "cleared"
+                  ? "Good Job"
+                  : "Ready"}
+              </div>
             </div>
           </div>
 
-          <div
-            className="relative overflow-hidden rounded-3xl border border-white/10 bg-slate-950 shadow-2xl"
-            style={{ aspectRatio: "16 / 9", touchAction: "none", userSelect: "none" }}
-            onPointerDown={beginThrust}
-            onPointerUp={endThrust}
-            onPointerCancel={endThrust}
-            onPointerLeave={endThrust}
-          >
-            <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
-
-            <div className="pointer-events-none absolute left-4 top-4 right-4 flex items-start justify-between gap-3">
-              <div
-                className="rounded-2xl border px-3 py-2 text-xs md:text-sm"
-                style={{ background: HUD_PANEL, borderColor: HUD_BORDER }}
-              >
-                <div className="font-semibold text-white">操作</div>
-                <div className="mt-1 text-white/80">長押しで推力 / 離すと落下</div>
-                <div className="text-white/80">端末を傾けると重力方向が少しずれます</div>
+          {!isLandscape && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/82 px-6 text-center">
+              <div className="max-w-md rounded-3xl border border-white/10 bg-slate-950/95 p-6 shadow-2xl">
+                <div className="text-xl font-semibold">横向きでプレイしてください</div>
+                <p className="mt-3 text-sm leading-6 text-white/75">
+                  この試作は横向き前提です。端末を横向きにしてから始めてください。
+                </p>
               </div>
-              <div
-                className="rounded-2xl border px-3 py-2 text-right text-xs md:text-sm"
-                style={{ background: HUD_PANEL, borderColor: HUD_BORDER }}
-              >
-                <div className="font-semibold text-white">状態</div>
-                <div className="mt-1 text-white/80">
-                  {gamePhase === "playing"
-                    ? "Playing"
-                    : gamePhase === "lost"
-                    ? "FAILED"
-                    : gamePhase === "cleared"
-                    ? "Good Job"
-                    : "Ready"}
-                </div>
-              </div>
-            </div>
-
-            {!isLandscape && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/82 px-6 text-center">
-                <div className="max-w-md rounded-3xl border border-white/10 bg-slate-950/95 p-6 shadow-2xl">
-                  <div className="text-xl font-semibold">横向きでプレイしてください</div>
-                  <p className="mt-3 text-sm leading-6 text-white/75">
-                    この試作は横向き前提です。端末を横向きにしてから始めてください。
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {isLandscape && gamePhase === "idle" && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/44 px-6 text-center">
-                <div className="pointer-events-auto max-w-lg rounded-3xl border border-white/10 bg-slate-950/92 p-6 shadow-2xl md:p-8">
-                  <div className="text-2xl font-semibold md:text-3xl">Shift the gravity</div>
-                  <p className="mt-3 text-sm leading-6 text-white/75 md:text-base">
-                    長押しで浮かび、離すと落ちます。端末を傾けると、重力方向が左右に少しずれます。
-                  </p>
-
-                  {permissionMessage && (
-                    <p className="mt-4 text-sm leading-6 text-emerald-300/90">{permissionMessage}</p>
-                  )}
-
-                  <div className="mt-6 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
-                    {permissionState === "needs-request" && (
-                      <button
-                        className="rounded-2xl border border-emerald-300/30 bg-emerald-300/10 px-5 py-3 text-sm font-medium text-emerald-200 transition hover:bg-emerald-300/15"
-                        onClick={handleEnableTilt}
-                      >
-                        傾き操作を有効にする
-                      </button>
-                    )}
-                    <button
-                      className="rounded-2xl border border-white/20 bg-white/10 px-6 py-3 text-sm font-medium text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
-                      onClick={startRun}
-                      disabled={!canStart}
-                    >
-                      Start
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {isLandscape && gamePhase === "lost" && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/44 px-6 text-center">
-                <div className="pointer-events-auto w-full max-w-md rounded-3xl border border-white/10 bg-slate-950/92 p-6 shadow-2xl md:p-8">
-                  <div className="text-2xl font-semibold md:text-3xl">FAILED</div>
-                  <p className="mt-3 text-sm leading-6 text-white/75">
-                    障害物か画面端に触れました。もう一度試せます。
-                  </p>
-                  <div className="mt-6">
-                    <button
-                      className="rounded-2xl border border-white/20 bg-white/10 px-6 py-3 text-sm font-medium text-white transition hover:bg-white/15"
-                      onClick={startRun}
-                    >
-                      Replay
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {isLandscape && gamePhase === "cleared" && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black/44 px-6 text-center">
-                <div className="pointer-events-auto w-full max-w-md rounded-3xl border border-emerald-300/20 bg-slate-950/92 p-6 shadow-2xl md:p-8">
-                  <div className="text-2xl font-semibold text-emerald-300 md:text-3xl">Good Job</div>
-                  <p className="mt-3 text-sm leading-6 text-white/75">
-                    初版ステージをクリアしました。今は同じステージを再プレイできます。
-                  </p>
-                  <div className="mt-6 flex items-center justify-center gap-3">
-                    <button
-                      className="rounded-2xl border border-white/20 bg-white/10 px-6 py-3 text-sm font-medium text-white transition hover:bg-white/15"
-                      onClick={startRun}
-                    >
-                      Replay
-                    </button>
-                    <button
-                      className="rounded-2xl border border-emerald-300/30 bg-emerald-300/10 px-6 py-3 text-sm font-medium text-emerald-200 transition hover:bg-emerald-300/15"
-                      onClick={startRun}
-                    >
-                      Play Again
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {showManualTiltFallback && (
-            <div className="mt-4 rounded-3xl border border-white/10 bg-slate-950/90 p-4 shadow-xl">
-              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <div className="text-sm font-semibold text-white">傾き代用スライダー</div>
-                  <div className="mt-1 text-xs leading-6 text-white/65 md:text-sm">
-                    PCプレビューや傾き未許可時は、ここで重力方向のずれを確認できます。
-                  </div>
-                </div>
-                <div className="text-sm text-white/70">
-                  {formatTiltText(manualTilt - neutralTiltRef.current)}
-                </div>
-              </div>
-              <input
-                className="mt-4 w-full"
-                type="range"
-                min={-30}
-                max={30}
-                step={0.1}
-                value={manualTilt}
-                onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
-                  setManualTilt(Number(event.target.value))
-                }
-              />
             </div>
           )}
 
-          <div className="mt-4 grid gap-3 text-xs text-white/60 md:grid-cols-3 md:text-sm">
-            <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-              <div className="font-semibold text-white/85">固定済み</div>
-              <div className="mt-1">横向き / 小さな四角 / 傾きで重力方向が少しずれる</div>
+          {isLandscape && gamePhase === "idle" && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/44 px-6 text-center">
+              <div className="pointer-events-auto max-w-lg rounded-3xl border border-white/10 bg-slate-950/92 p-6 shadow-2xl md:p-8">
+                <div className="text-2xl font-semibold md:text-3xl">Shift the gravity</div>
+                <p className="mt-3 text-sm leading-6 text-white/75 md:text-base">
+                  長押しで浮かび、離すと落ちます。端末を傾けると、重力方向が左右に少しずれます。
+                </p>
+
+                {permissionMessage && (
+                  <p className="mt-4 text-sm leading-6 text-emerald-300/90">{permissionMessage}</p>
+                )}
+
+                <div className="mt-6 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
+                  {permissionState === "needs-request" && (
+                    <button
+                      className="rounded-2xl border border-emerald-300/30 bg-emerald-300/10 px-5 py-3 text-sm font-medium text-emerald-200 transition hover:bg-emerald-300/15"
+                      onClick={handleEnableTilt}
+                    >
+                      傾き操作を有効にする
+                    </button>
+                  )}
+                  <button
+                    className="rounded-2xl border border-white/20 bg-white/10 px-6 py-3 text-sm font-medium text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
+                    onClick={startRun}
+                    disabled={!canStart}
+                  >
+                    Start
+                  </button>
+                </div>
+              </div>
             </div>
-            <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-              <div className="font-semibold text-white/85">今後の調整点</div>
-              <div className="mt-1">GRAVITY / THRUST / 速度上限 / 障害物配置</div>
+          )}
+
+          {isLandscape && gamePhase === "lost" && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/44 px-6 text-center">
+              <div className="pointer-events-auto w-full max-w-md rounded-3xl border border-white/10 bg-slate-950/92 p-6 shadow-2xl md:p-8">
+                <div className="text-2xl font-semibold md:text-3xl">FAILED</div>
+                <p className="mt-3 text-sm leading-6 text-white/75">
+                  障害物か画面端に触れました。もう一度試せます。
+                </p>
+                <div className="mt-6">
+                  <button
+                    className="rounded-2xl border border-white/20 bg-white/10 px-6 py-3 text-sm font-medium text-white transition hover:bg-white/15"
+                    onClick={startRun}
+                  >
+                    Replay
+                  </button>
+                </div>
+              </div>
             </div>
-            <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-              <div className="font-semibold text-white/85">優先順位</div>
-              <div className="mt-1">まずは実機で、押して上がる感覚と落下感の確認</div>
+          )}
+
+          {isLandscape && gamePhase === "cleared" && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/44 px-6 text-center">
+              <div className="pointer-events-auto w-full max-w-md rounded-3xl border border-emerald-300/20 bg-slate-950/92 p-6 shadow-2xl md:p-8">
+                <div className="text-2xl font-semibold text-emerald-300 md:text-3xl">Good Job</div>
+                <p className="mt-3 text-sm leading-6 text-white/75">
+                  初版ステージをクリアしました。今は同じステージを再プレイできます。
+                </p>
+                <div className="mt-6 flex items-center justify-center gap-3">
+                  <button
+                    className="rounded-2xl border border-white/20 bg-white/10 px-6 py-3 text-sm font-medium text-white transition hover:bg-white/15"
+                    onClick={startRun}
+                  >
+                    Replay
+                  </button>
+                  <button
+                    className="rounded-2xl border border-emerald-300/30 bg-emerald-300/10 px-6 py-3 text-sm font-medium text-emerald-200 transition hover:bg-emerald-300/15"
+                    onClick={startRun}
+                  >
+                    Play Again
+                  </button>
+                </div>
+              </div>
             </div>
-          </div>
+          )}
         </div>
+
+        {showManualTiltFallback && (
+          <div className="mt-2 w-full max-w-4xl rounded-3xl border border-white/10 bg-slate-950/90 p-3 shadow-xl md:mt-4 md:p-4">
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between md:gap-3">
+              <div>
+                <div className="text-sm font-semibold text-white">傾き代用スライダー</div>
+                <div className="mt-1 text-xs leading-5 text-white/65 md:text-sm">
+                  PCプレビューや傾き未許可時は、ここで重力方向のずれを確認できます。
+                </div>
+              </div>
+              <div className="text-sm text-white/70">
+                {formatTiltText(manualTilt - neutralTiltRef.current)}
+              </div>
+            </div>
+            <input
+              className="mt-3 w-full"
+              type="range"
+              min={-30}
+              max={30}
+              step={0.1}
+              value={manualTilt}
+              onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+                setManualTilt(Number(event.target.value))
+              }
+            />
+          </div>
+        )}
       </div>
     </div>
   );
 }
-
