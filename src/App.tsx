@@ -1,7 +1,7 @@
 
-// Shift the Gravity App.tsx v3
+// Shift the Gravity App.tsx v4
 // 2026-03-29
-// 変更点: 実機フィードバックを反映。傾き感度を上げ、傾き方向を補正し、上昇時と落下時で横ズレ方向が揃うように修正。横向きスマホで収まりやすい画面サイズに調整し、長押し時の選択/コピーメニューも抑制。
+// 変更点: 実機フィードバックを反映。傾き感度を上げ、傾き方向を補正し、上昇時と落下時で横ズレ方向が揃うように修正。横向きスマホで収まりやすい画面サイズに調整し、長押し時の選択/コピーメニューも抑制➡V4で前後でなく左右の傾きを感知するgammax4->betax4。
 
 import React, { useEffect, useRef, useState } from "react";
 
@@ -135,10 +135,10 @@ function getOrientationType(): string {
 }
 
 function readRawTiltDegrees(event: DeviceOrientationEvent): number {
-  const gamma = Number.isFinite(event.gamma) ? event.gamma : 0;
+  const beta = Number.isFinite(event.beta) ? event.beta : 0;
   const type = getOrientationType();
   const sign = type === "landscape-secondary" ? -1 : 1;
-  return gamma * sign * TILT_DIRECTION;
+  return beta * sign * TILT_DIRECTION;
 }
 
 function resizeCanvasToDisplaySize(canvas: HTMLCanvasElement): {
