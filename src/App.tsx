@@ -1,12 +1,12 @@
 
-// Shift the Gravity App.tsx v6
+// Shift the Gravity App.tsx v6.1
 // 2026-03-29
-// 変更点: Recenter追加、外枠強化、かすり音+視覚効果、死亡時の衝突音+衝突マークを実装。MAX_RISE_SPEED 940 を正本に反映。
+// 変更点: FAILED表示を衝突の0.18秒後に変更し、少しフェードインするよう調整。FAILED背景を弱め、衝突演出を見やすくした。振動は任意対応で衝突時のみ追加。MAX_RISE_SPEED 940 を維持。
 
 import React, { useEffect, useRef, useState } from "react";
 
 // ===== TYPES =====
-type GamePhase = "idle" | "playing" | "lost" | "cleared";
+type GamePhase = "idle" | "playing" | "impact" | "lost" | "cleared";
 type PermissionState =
   | "checking"
   | "needs-request"
@@ -90,6 +90,8 @@ const GRAZE_MIN_SPEED = 320;
 const GRAZE_COOLDOWN_MS = 120;
 const GRAZE_PARTICLE_LIFE = 0.12;
 const IMPACT_EFFECT_LIFE = 0.2;
+const LOST_DELAY_MS = 180;
+const LOST_FADE_MS = 120;
 
 const BG_COLOR = "#0b0f14";
 const FIELD_COLOR = "#101826";
@@ -251,6 +253,7 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
   const grazeEffectsRef = useRef<ParticleEffect[]>([]);
   const impactEffectRef = useRef<ImpactEffect | null>(null);
   const lastGrazeAtRef = useRef<number>(0);
+  const loseTimeoutRef = useRef<number | null>(null);
 
   const [gamePhase, setGamePhase] = useState<GamePhase>("idle");
   const [permissionState, setPermissionState] = useState<PermissionState>("checking");
@@ -259,6 +262,7 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
   const [debugTilt, setDebugTilt] = useState<number>(0);
   const [showManualTiltFallback, setShowManualTiltFallback] = useState<boolean>(false);
   const [recenterTick, setRecenterTick] = useState<number>(0);
+  const [lostOverlayVisible, setLostOverlayVisible] = useState<boolean>(false);
 
   const phaseRef = useRef<GamePhase>("idle");
   const pointerActiveRef = useRef<boolean>(false);
@@ -387,6 +391,27 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
     return () => window.clearTimeout(timer);
   }, [recenterTick]);
 
+  useEffect(() => {
+    if (gamePhase !== "lost") {
+      setLostOverlayVisible(false);
+      return;
+    }
+
+    const rafId = window.requestAnimationFrame(() => {
+      setLostOverlayVisible(true);
+    });
+
+    return () => window.cancelAnimationFrame(rafId);
+  }, [gamePhase]);
+
+  useEffect(() => {
+    return () => {
+      if (loseTimeoutRef.current !== null) {
+        window.clearTimeout(loseTimeoutRef.current);
+      }
+    };
+  }, []);
+
   function getCurrentTiltDegrees(): number {
     return permissionState === "granted" && !showManualTiltFallback
       ? liveTiltRef.current
@@ -460,12 +485,26 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
     osc.stop(now + 0.16);
   }
 
+  function vibrateImpact(): void {
+    if (typeof navigator === "undefined" || typeof navigator.vibrate !== "function") {
+      return;
+    }
+
+    navigator.vibrate(18);
+  }
+
   function resetStage(): void {
+    if (loseTimeoutRef.current !== null) {
+      window.clearTimeout(loseTimeoutRef.current);
+      loseTimeoutRef.current = null;
+    }
+
     playerRef.current = makeInitialPlayer();
     trailRef.current = [];
     grazeEffectsRef.current = [];
     impactEffectRef.current = null;
     loopTimeRef.current = 0;
+    setLostOverlayVisible(false);
   }
 
   function startRun(): void {
@@ -480,10 +519,28 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
     setRecenterTick(Date.now());
   }
 
-  function finishRun(nextPhase: Extract<GamePhase, "lost" | "cleared">): void {
+  function finishRun(nextPhase: Extract<GamePhase, "cleared">): void {
     if (phaseRef.current !== "playing") return;
     pointerActiveRef.current = false;
     setGamePhase(nextPhase);
+  }
+
+  function startLoseSequence(point: Vec2): void {
+    if (phaseRef.current !== "playing") return;
+
+    pointerActiveRef.current = false;
+    triggerImpact(point);
+    vibrateImpact();
+    setGamePhase("impact");
+
+    if (loseTimeoutRef.current !== null) {
+      window.clearTimeout(loseTimeoutRef.current);
+    }
+
+    loseTimeoutRef.current = window.setTimeout(() => {
+      loseTimeoutRef.current = null;
+      setGamePhase("lost");
+    }, LOST_DELAY_MS);
   }
 
   function triggerGraze(point: Vec2): void {
@@ -679,15 +736,13 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
         player.y - player.size * 0.5 < 0 ||
         player.y + player.size * 0.5 > WORLD_HEIGHT
       ) {
-        triggerImpact({ x: clamp(player.x, 0, WORLD_WIDTH), y: clamp(player.y, 0, WORLD_HEIGHT) });
-        finishRun("lost");
+        startLoseSequence({ x: clamp(player.x, 0, WORLD_WIDTH), y: clamp(player.y, 0, WORLD_HEIGHT) });
         return;
       }
 
       const collidedObstacle = STAGE_OBSTACLES.find((obstacle) => rectsOverlap(hitbox, obstacle));
       if (collidedObstacle) {
-        triggerImpact(getClosestPointOnRect({ x: player.x, y: player.y }, collidedObstacle));
-        finishRun("lost");
+        startLoseSequence(getClosestPointOnRect({ x: player.x, y: player.y }, collidedObstacle));
         return;
       }
 
@@ -844,7 +899,7 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
         <div className="mb-2 flex w-full items-center justify-between gap-3 px-1 text-[11px] text-white/70 md:mb-3 md:text-sm">
           <div>
             <span className="font-semibold text-white">Shift the gravity</span>
-            <span className="ml-2">試作版 v6</span>
+            <span className="ml-2">試作版 v6.1</span>
           </div>
           <div className="flex items-center gap-2">
             {recenterTick > 0 && (
@@ -896,6 +951,8 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
                 <div className="mt-1 text-white/80">
                   {gamePhase === "playing"
                     ? "Playing"
+                    : gamePhase === "impact"
+                    ? "Impact"
                     : gamePhase === "lost"
                     ? "FAILED"
                     : gamePhase === "cleared"
@@ -951,8 +1008,13 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
           )}
 
           {isLandscape && gamePhase === "lost" && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/44 px-6 text-center">
-              <div className="pointer-events-auto w-full max-w-md rounded-3xl border border-white/10 bg-slate-950/92 p-6 shadow-2xl md:p-8">
+            <div
+              className={`absolute inset-0 flex items-center justify-center bg-black/24 px-6 text-center transition-opacity ${
+                lostOverlayVisible ? "opacity-100" : "opacity-0"
+              }`}
+              style={{ transitionDuration: `${LOST_FADE_MS}ms` }}
+            >
+              <div className="pointer-events-auto w-full max-w-md rounded-3xl border border-white/10 bg-slate-950/82 p-6 shadow-2xl md:p-8">
                 <div className="text-2xl font-semibold md:text-3xl">FAILED</div>
                 <p className="mt-3 text-sm leading-6 text-white/75">
                   障害物か画面端に触れました。もう一度試せます。
