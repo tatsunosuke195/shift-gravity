@@ -59,7 +59,7 @@ const STAGE_OBSTACLES: Rect[] = [
 // --- ここが実機で一番触る場所 ---
 const GRAVITY = 1040;
 const THRUST = 1360;
-const MAX_RISE_SPEED = 820;
+const MAX_RISE_SPEED = 900;
 const MAX_FALL_SPEED = 980;
 const MAX_SIDE_SPEED = 760;
 const LINEAR_DAMPING = 1.08;
