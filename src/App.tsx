@@ -1,7 +1,7 @@
 
-// Shift the Gravity App.tsx v4
+// Shift the Gravity App.tsx v5
 // 2026-03-29
-// 変更点: 実機フィードバックを反映。傾き感度を上げ、傾き方向を補正し、上昇時と落下時で横ズレ方向が揃うように修正。横向きスマホで収まりやすい画面サイズに調整し、長押し時の選択/コピーメニューも抑制➡V4で前後でなく左右の傾きを感知するgammax4->betax4, TILT_DIRECTIONを-1->1。
+// 変更点: 初版の遊びやすさを改善。開始位置を少し高くし、first stage をよりシンプルで試しやすい配置に変更。
 
 import React, { useEffect, useRef, useState } from "react";
 
@@ -47,16 +47,13 @@ const WORLD_HEIGHT = 900;
 const PLAYER_SIZE = 24;
 const PLAYER_HITBOX_SCALE = 0.84;
 
-const START_POSITION: Vec2 = { x: 140, y: 760 };
+const START_POSITION: Vec2 = { x: 140, y: 660 };
 const GOAL_RECT: Rect = { x: 1400, y: 84, w: 112, h: 112 };
 
 const STAGE_OBSTACLES: Rect[] = [
-  { x: 320, y: 250, w: 90, h: 470 },
-  { x: 520, y: 250, w: 280, h: 80 },
-  { x: 760, y: 390, w: 90, h: 350 },
-  { x: 930, y: 180, w: 360, h: 80 },
-  { x: 1120, y: 180, w: 80, h: 320 },
-  { x: 1240, y: 560, w: 220, h: 80 },
+  { x: 520, y: 420, w: 80, h: 300 },
+  { x: 860, y: 180, w: 80, h: 260 },
+  { x: 1120, y: 520, w: 220, h: 80 },
 ];
 
 // --- ここが実機で一番触る場所 ---
@@ -541,7 +538,7 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
         <div className="mb-2 flex w-full items-center justify-between gap-3 px-1 text-[11px] text-white/70 md:mb-3 md:text-sm">
           <div>
             <span className="font-semibold text-white">Shift the gravity</span>
-            <span className="ml-2">試作版 v3</span>
+            <span className="ml-2">試作版 v5</span>
           </div>
           <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
             tilt {formatTiltText(debugTilt)}
