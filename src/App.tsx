@@ -1,7 +1,7 @@
 
 // Shift the Gravity App.tsx v4
 // 2026-03-29
-// 変更点: 実機フィードバックを反映。傾き感度を上げ、傾き方向を補正し、上昇時と落下時で横ズレ方向が揃うように修正。横向きスマホで収まりやすい画面サイズに調整し、長押し時の選択/コピーメニューも抑制➡V4で前後でなく左右の傾きを感知するgammax4->betax4。
+// 変更点: 実機フィードバックを反映。傾き感度を上げ、傾き方向を補正し、上昇時と落下時で横ズレ方向が揃うように修正。横向きスマホで収まりやすい画面サイズに調整し、長押し時の選択/コピーメニューも抑制➡V4で前後でなく左右の傾きを感知するgammax4->betax4, TILT_DIRECTIONを-1->1。
 
 import React, { useEffect, useRef, useState } from "react";
 
@@ -68,7 +68,7 @@ const MAX_SIDE_SPEED = 760;
 const LINEAR_DAMPING = 1.08;
 const MAX_INPUT_TILT_DEG = 18;
 const MAX_GRAVITY_ROTATION_RAD = 0.82;
-const TILT_DIRECTION = -1;
+const TILT_DIRECTION = 1;
 
 const BG_COLOR = "#0b0f14";
 const FIELD_COLOR = "#101826";
