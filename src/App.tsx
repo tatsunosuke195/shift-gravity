@@ -73,6 +73,45 @@ const PLAYER_SIZE = 24;
 const PLAYER_HITBOX_SCALE = 0.76;
 
 const STAGES: StageDefinition[] = [
+    {
+    id: "stage-1",
+    name: "Stage-1",
+    start: { x: 250, y: 200 },
+    goal: { x: 1150, y: 100, w: 310, h: 150 },
+    obstacles: [
+      { x: 860, y: 0, w: 200, h: 500 },
+    ],
+  },
+
+  {
+    id: "stage-2",
+    name: "Stage-2",
+    start: { x: 200, y: 200 },
+    goal: { x: 1400, y: 0, w: 200, h: 100 },
+    obstacles: [
+      { x: 400, y: 0, w: 150, h: 600 },
+      { x: 850, y: 250, w: 150, h: 650 },
+      { x: 1250, y: 0, w: 150, h: 650 },
+      { x: 1400, y: 550, w: 50, h: 50 },
+      { x: 1550, y: 350, w: 50, h: 50 },
+      { x: 1400, y: 150, w: 100, h: 50 },
+    ],
+  },
+  
+  {
+    id: "stage-3",
+    name: "Stage-3",
+    start: { x: 200, y: 500 },
+    goal: { x: 0, y: 250, w: 300, h: 100 },
+    obstacles: [
+      { x: 0, y: 350, w: 300, h: 100 },
+      { x: 350, y: 150, w: 200, h: 250 },
+      { x: 400, y: 400, w: 1000, h: 250 },
+      { x: 1150, y: 200, w: 200, h: 200 },
+      { x: 650, y: 50, w: 350, h: 200 },
+    ],
+  },
+  
   {
     id: "first-drift",
     name: "First Drift",
