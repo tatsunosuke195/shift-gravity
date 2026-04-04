@@ -1,3 +1,5 @@
+
+
 // Shift the Gravity App.tsx v6.5
 // 2026-03-29
 // 変更点: ゴールを静かな四角に戻した。currentStageIndex を更新できるようにし、クリア時に Next Stage を実装。最終ステージのみ Congratulations を表示し、Replay は常に現在のステージをやり直す形に整理。
@@ -98,9 +100,9 @@ const STAGES: StageDefinition[] = [
     id: "stage-3",
     name: "Stage-3",
     start: { x: 200, y: 500 },
-    goal: { x: 0, y: 250, w: 300, h: 100 },
+    goal: { x: 0, y: 250, w: 350, h: 100 },
     obstacles: [
-      { x: 0, y: 350, w: 300, h: 100 },
+      { x: 0, y: 350, w: 350, h: 100 },
       { x: 350, y: 150, w: 200, h: 250 },
       { x: 350, y: 400, w: 1000, h: 250 },
       { x: 1150, y: 200, w: 200, h: 200 },
@@ -1119,4 +1121,3 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
     </div>
   );
 }
-
