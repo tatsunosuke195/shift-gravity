@@ -1,8 +1,8 @@
-// Shift the Gravity App.tsx v6.3
+// Shift the Gravity App.tsx v6.4
 // 2026-03-29
-// 変更点: フィールド内の「操作」「状態」を撤去。傾き代用スライダーを撤去。RecenterはStart前/FAILED後/CLEAR後のみに整理し、プレイ中の画面内ボタンをなくした。版表示のみ上部に残し、tilt表示も撤去。
+// 変更点: ゴールをエメラルドの発光ゲート表現に変更。ステージを start / goal / obstacles を持つデータ構造へ整理し、今後の追加に備えた。
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 // ===== TYPES =====
 type GamePhase = "idle" | "playing" | "impact" | "lost" | "cleared";
@@ -57,6 +57,14 @@ type ImpactEffect = {
   maxLife: number;
 };
 
+type StageDefinition = {
+  id: string;
+  name: string;
+  start: Vec2;
+  goal: Rect;
+  obstacles: Rect[];
+};
+
 // ===== CONSTANTS =====
 const WORLD_WIDTH = 1600;
 const WORLD_HEIGHT = 900;
@@ -64,14 +72,21 @@ const WORLD_HEIGHT = 900;
 const PLAYER_SIZE = 24;
 const PLAYER_HITBOX_SCALE = 0.76;
 
-const START_POSITION: Vec2 = { x: 140, y: 660 };
-const GOAL_RECT: Rect = { x: 1400, y: 84, w: 112, h: 112 };
-
-const STAGE_OBSTACLES: Rect[] = [
-  { x: 520, y: 420, w: 80, h: 300 },
-  { x: 860, y: 180, w: 80, h: 260 },
-  { x: 1120, y: 520, w: 220, h: 80 },
+const STAGES: StageDefinition[] = [
+  {
+    id: "first-drift",
+    name: "First Drift",
+    start: { x: 140, y: 660 },
+    goal: { x: 1400, y: 84, w: 112, h: 112 },
+    obstacles: [
+      { x: 520, y: 420, w: 80, h: 300 },
+      { x: 860, y: 180, w: 80, h: 260 },
+      { x: 1120, y: 520, w: 220, h: 80 },
+    ],
+  },
 ];
+
+const INITIAL_STAGE_INDEX = 0;
 
 // --- ここが実機で一番触る場所 ---
 const GRAVITY = 1040;
@@ -102,8 +117,8 @@ const GRAZE_COLOR = "rgba(220, 240, 255, 0.96)";
 const IMPACT_COLOR = "rgba(255, 146, 146, 0.96)";
 const OBSTACLE_FILL = "#8b93a7";
 const OBSTACLE_STROKE = "rgba(255,255,255,0.5)";
-const GOAL_FILL = "rgba(158, 255, 173, 0.2)";
-const GOAL_STROKE = "#9effad";
+const GOAL_GLOW = "rgba(158, 255, 173, 0.92)";
+const GOAL_GLOW_SOFT = "rgba(158, 255, 173, 0.22)";
 
 // ===== HELPERS =====
 function clamp(value: number, min: number, max: number): number {
@@ -219,10 +234,10 @@ function resizeCanvasToDisplaySize(canvas: HTMLCanvasElement): {
   return { width, height, dpr };
 }
 
-function makeInitialPlayer(): Player {
+function makeInitialPlayer(start: Vec2): Player {
   return {
-    x: START_POSITION.x,
-    y: START_POSITION.y,
+    x: start.x,
+    y: start.y,
     vx: 0,
     vy: 0,
     size: PLAYER_SIZE,
@@ -236,6 +251,52 @@ function isDesktopLike(): boolean {
 
 function getSpeedMagnitude(player: Player): number {
   return Math.hypot(player.vx, player.vy);
+}
+
+function drawGoalGate(ctx: CanvasRenderingContext2D, goal: Rect, timeMs: number): void {
+  const pulse = 0.76 + ((Math.sin(timeMs / 320) + 1) * 0.5) * 0.32;
+  const railWidth = Math.max(8, goal.w * 0.12);
+  const leftX = goal.x + railWidth * 0.55;
+  const rightX = goal.x + goal.w - railWidth * 1.55;
+  const topY = goal.y + 8;
+  const gateHeight = goal.h - 16;
+  const beamGap = goal.w * 0.5;
+
+  ctx.save();
+  ctx.globalAlpha = 0.32 * pulse;
+  ctx.fillStyle = GOAL_GLOW_SOFT;
+  ctx.fillRect(goal.x - 10, goal.y - 10, goal.w + 20, goal.h + 20);
+  ctx.restore();
+
+  ctx.save();
+  ctx.shadowColor = GOAL_GLOW;
+  ctx.shadowBlur = 26 + pulse * 12;
+  ctx.fillStyle = GOAL_GLOW;
+  ctx.globalAlpha = 0.96;
+  ctx.fillRect(leftX, topY, railWidth, gateHeight);
+  ctx.fillRect(rightX, topY, railWidth, gateHeight);
+  ctx.restore();
+
+  ctx.save();
+  ctx.strokeStyle = GOAL_GLOW;
+  ctx.lineWidth = 3;
+  ctx.globalAlpha = 0.85;
+  ctx.strokeRect(goal.x + 6, goal.y + 6, goal.w - 12, goal.h - 12);
+  ctx.restore();
+
+  ctx.save();
+  ctx.strokeStyle = GOAL_GLOW;
+  ctx.lineWidth = 2;
+  ctx.globalAlpha = 0.22 + pulse * 0.18;
+  for (let i = 0; i < 4; i += 1) {
+    const t = ((timeMs / 520) + i * 0.24) % 1;
+    const y = goal.y + 10 + t * (goal.h - 20);
+    ctx.beginPath();
+    ctx.moveTo(goal.x + beamGap * 0.28, y);
+    ctx.lineTo(goal.x + goal.w - beamGap * 0.28, y - 10);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 // ===== MAIN APP =====
@@ -252,6 +313,11 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
   const [isLandscape, setIsLandscape] = useState<boolean>(true);
   const [recenterTick, setRecenterTick] = useState<number>(0);
   const [lostOverlayVisible, setLostOverlayVisible] = useState<boolean>(false);
+  const [currentStageIndex] = useState<number>(INITIAL_STAGE_INDEX);
+
+  const currentStage = useMemo<StageDefinition>(() => {
+    return STAGES[currentStageIndex] ?? STAGES[0];
+  }, [currentStageIndex]);
 
   const phaseRef = useRef<GamePhase>("idle");
   const pointerActiveRef = useRef<boolean>(false);
@@ -259,7 +325,7 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
   const liveTiltRef = useRef<number>(0);
   const loopTimeRef = useRef<number>(0);
   const trailRef = useRef<Vec2[]>([]);
-  const playerRef = useRef<Player>(makeInitialPlayer());
+  const playerRef = useRef<Player>(makeInitialPlayer(currentStage.start));
 
   const supportsOrientation = typeof window !== "undefined" && !!getDeviceOrientationCtor();
   const canStart = isLandscape && permissionState === "granted";
@@ -292,6 +358,11 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
   useEffect(() => {
     phaseRef.current = gamePhase;
   }, [gamePhase]);
+
+  useEffect(() => {
+    playerRef.current = makeInitialPlayer(currentStage.start);
+    trailRef.current = [];
+  }, [currentStage]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -366,13 +437,13 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
         updateEffects(deltaTime);
       }
 
-      drawScene();
+      drawScene(timestamp);
       rafId = window.requestAnimationFrame(stepAndDraw);
     };
 
     rafId = window.requestAnimationFrame(stepAndDraw);
     return () => window.cancelAnimationFrame(rafId);
-  }, [permissionState]);
+  }, [permissionState, currentStage]);
 
   useEffect(() => {
     if (recenterTick === 0) return;
@@ -502,7 +573,7 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
       loseTimeoutRef.current = null;
     }
 
-    playerRef.current = makeInitialPlayer();
+    playerRef.current = makeInitialPlayer(currentStage.start);
     trailRef.current = [];
     grazeEffectsRef.current = [];
     impactEffectRef.current = null;
@@ -661,7 +732,7 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
     let nearestDistance = Infinity;
     let nearestPoint: Vec2 | null = null;
 
-    STAGE_OBSTACLES.forEach((obstacle) => {
+    currentStage.obstacles.forEach((obstacle) => {
       const distance = getRectGap(hitbox, obstacle);
       if (distance < nearestDistance) {
         nearestDistance = distance;
@@ -739,13 +810,13 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
         return;
       }
 
-      const collidedObstacle = STAGE_OBSTACLES.find((obstacle) => rectsOverlap(hitbox, obstacle));
+      const collidedObstacle = currentStage.obstacles.find((obstacle) => rectsOverlap(hitbox, obstacle));
       if (collidedObstacle) {
         startLoseSequence(getClosestPointOnRect({ x: player.x, y: player.y }, collidedObstacle));
         return;
       }
 
-      if (rectsOverlap(hitbox, GOAL_RECT)) {
+      if (rectsOverlap(hitbox, currentStage.goal)) {
         finishRun("cleared");
         return;
       }
@@ -754,7 +825,7 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
     }
   }
 
-  function drawScene(): void {
+  function drawScene(timeMs: number): void {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -802,17 +873,9 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
     ctx.strokeRect(2, 2, WORLD_WIDTH - 4, WORLD_HEIGHT - 4);
     ctx.restore();
 
-    ctx.save();
-    ctx.fillStyle = GOAL_FILL;
-    ctx.strokeStyle = GOAL_STROKE;
-    ctx.lineWidth = 4;
-    ctx.shadowColor = GOAL_STROKE;
-    ctx.shadowBlur = 26;
-    ctx.fillRect(GOAL_RECT.x, GOAL_RECT.y, GOAL_RECT.w, GOAL_RECT.h);
-    ctx.strokeRect(GOAL_RECT.x, GOAL_RECT.y, GOAL_RECT.w, GOAL_RECT.h);
-    ctx.restore();
+    drawGoalGate(ctx, currentStage.goal, timeMs);
 
-    STAGE_OBSTACLES.forEach((obstacle: Rect) => {
+    currentStage.obstacles.forEach((obstacle: Rect) => {
       ctx.fillStyle = OBSTACLE_FILL;
       ctx.strokeStyle = OBSTACLE_STROKE;
       ctx.lineWidth = 3;
@@ -897,7 +960,7 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
         <div className="mb-2 flex w-full items-center justify-between gap-3 px-1 text-[11px] text-white/70 md:mb-3 md:text-sm">
           <div>
             <span className="font-semibold text-white">Shift the gravity</span>
-            <span className="ml-2">試作版 v6.3</span>
+            <span className="ml-2">試作版 v6.4</span>
           </div>
           <div>
             {recenterTick > 0 && (
@@ -931,6 +994,9 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
                 <div className="text-2xl font-semibold md:text-3xl">Shift the gravity</div>
                 <p className="mt-3 text-sm leading-6 text-white/75 md:text-base">
                   長押しで浮かび、離すと落ちます。端末を傾けると、重力方向が左右に少しずれます。
+                </p>
+                <p className="mt-2 text-xs leading-5 text-white/55 md:text-sm">
+                  Stage: {currentStage.name}
                 </p>
 
                 {permissionMessage && (
