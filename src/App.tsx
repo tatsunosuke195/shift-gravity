@@ -102,7 +102,7 @@ const STAGES: StageDefinition[] = [
     obstacles: [
       { x: 0, y: 350, w: 300, h: 100 },
       { x: 350, y: 150, w: 200, h: 250 },
-      { x: 400, y: 400, w: 1000, h: 250 },
+      { x: 350, y: 400, w: 1000, h: 250 },
       { x: 1150, y: 200, w: 200, h: 200 },
       { x: 650, y: 50, w: 350, h: 200 },
     ],
@@ -1119,3 +1119,4 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
     </div>
   );
 }
+
