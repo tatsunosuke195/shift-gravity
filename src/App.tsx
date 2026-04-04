@@ -63,7 +63,7 @@ const WORLD_WIDTH = 1600;
 const WORLD_HEIGHT = 900;
 
 const PLAYER_SIZE = 24;
-const PLAYER_HITBOX_SCALE = 0.84;
+const PLAYER_HITBOX_SCALE = 0.76;
 
 const START_POSITION: Vec2 = { x: 140, y: 660 };
 const GOAL_RECT: Rect = { x: 1400, y: 84, w: 112, h: 112 };
@@ -85,7 +85,7 @@ const MAX_INPUT_TILT_DEG = 18;
 const MAX_GRAVITY_ROTATION_RAD = 0.82;
 const TILT_DIRECTION = 1;
 
-const GRAZE_DISTANCE = 20;
+const GRAZE_DISTANCE = 28;
 const GRAZE_MIN_SPEED = 320;
 const GRAZE_COOLDOWN_MS = 120;
 const GRAZE_PARTICLE_LIFE = 0.12;
