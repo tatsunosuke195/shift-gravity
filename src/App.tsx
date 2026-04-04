@@ -1,7 +1,6 @@
-
-// Shift the Gravity App.tsx v6.1
+// Shift the Gravity App.tsx v6.2
 // 2026-03-29
-// 変更点: FAILED表示を衝突の0.18秒後に変更し、少しフェードインするよう調整。FAILED背景を弱め、衝突演出を見やすくした。振動は任意対応で衝突時のみ追加。MAX_RISE_SPEED 940 を維持。
+// 変更点: 画面外に指がずれても推力が切れにくいよう、押し判定をゲーム画面外まで広げた。FAILED演出と物理は維持。
 
 import React, { useEffect, useRef, useState } from "react";
 
@@ -283,6 +282,11 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
     overflow: "hidden",
     overscrollBehavior: "none",
     background: "#000",
+    touchAction: "none",
+    userSelect: "none",
+    WebkitUserSelect: "none",
+    WebkitTouchCallout: "none",
+    WebkitTapHighlightColor: "transparent",
   };
   const gameFrameStyle: React.CSSProperties = {
     aspectRatio: "16 / 9",
@@ -409,6 +413,20 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
       if (loseTimeoutRef.current !== null) {
         window.clearTimeout(loseTimeoutRef.current);
       }
+    };
+  }, []);
+
+  useEffect(() => {
+    const release = () => {
+      pointerActiveRef.current = false;
+    };
+
+    window.addEventListener("pointerup", release);
+    window.addEventListener("pointercancel", release);
+
+    return () => {
+      window.removeEventListener("pointerup", release);
+      window.removeEventListener("pointercancel", release);
     };
   }, []);
 
@@ -645,7 +663,7 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
     ensureAudioReady();
     if (phaseRef.current !== "playing") return;
     const target = event.target as HTMLElement | null;
-    if (target?.closest("button")) return;
+    if (target?.closest("button") || target?.closest("input")) return;
     pointerActiveRef.current = true;
     window.getSelection()?.removeAllRanges();
   }
@@ -894,12 +912,19 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
       : "";
 
   return (
-    <div className="w-full bg-black text-white" style={rootStyle}>
+    <div
+      className="w-full bg-black text-white"
+      style={rootStyle}
+      onPointerDown={beginThrust}
+      onPointerUp={endThrust}
+      onPointerCancel={endThrust}
+      onContextMenu={(event) => event.preventDefault()}
+    >
       <div className="mx-auto flex h-full max-w-7xl flex-col items-center justify-center p-2 md:p-4">
         <div className="mb-2 flex w-full items-center justify-between gap-3 px-1 text-[11px] text-white/70 md:mb-3 md:text-sm">
           <div>
             <span className="font-semibold text-white">Shift the gravity</span>
-            <span className="ml-2">試作版 v6.1</span>
+            <span className="ml-2">試作版 v6.2</span>
           </div>
           <div className="flex items-center gap-2">
             {recenterTick > 0 && (
@@ -916,11 +941,6 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
         <div
           className="relative overflow-hidden rounded-3xl border border-white/10 bg-slate-950 shadow-2xl"
           style={gameFrameStyle}
-          onPointerDown={beginThrust}
-          onPointerUp={endThrust}
-          onPointerCancel={endThrust}
-          onPointerLeave={endThrust}
-          onContextMenu={(event) => event.preventDefault()}
         >
           <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
 
