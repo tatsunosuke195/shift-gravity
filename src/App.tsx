@@ -1,6 +1,6 @@
-// Shift the Gravity App.tsx v6.4
+// Shift the Gravity App.tsx v6.5
 // 2026-03-29
-// 変更点: ゴールをエメラルドの発光ゲート表現に変更。ステージを start / goal / obstacles を持つデータ構造へ整理し、今後の追加に備えた。
+// 変更点: ゴールを静かな四角に戻した。currentStageIndex を更新できるようにし、クリア時に Next Stage を実装。最終ステージのみ Congratulations を表示し、Replay は常に現在のステージをやり直す形に整理。
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
@@ -73,16 +73,13 @@ const PLAYER_SIZE = 24;
 const PLAYER_HITBOX_SCALE = 0.76;
 
 const STAGES: StageDefinition[] = [
-    {
+  {
     id: "stage-1",
     name: "Stage-1",
     start: { x: 250, y: 200 },
     goal: { x: 1150, y: 100, w: 310, h: 150 },
-    obstacles: [
-      { x: 860, y: 0, w: 200, h: 500 },
-    ],
+    obstacles: [{ x: 860, y: 0, w: 200, h: 500 }],
   },
-
   {
     id: "stage-2",
     name: "Stage-2",
@@ -97,7 +94,6 @@ const STAGES: StageDefinition[] = [
       { x: 1400, y: 150, w: 100, h: 50 },
     ],
   },
-  
   {
     id: "stage-3",
     name: "Stage-3",
@@ -111,7 +107,6 @@ const STAGES: StageDefinition[] = [
       { x: 650, y: 50, w: 350, h: 200 },
     ],
   },
-  
   {
     id: "first-drift",
     name: "First Drift",
@@ -156,8 +151,8 @@ const GRAZE_COLOR = "rgba(220, 240, 255, 0.96)";
 const IMPACT_COLOR = "rgba(255, 146, 146, 0.96)";
 const OBSTACLE_FILL = "#8b93a7";
 const OBSTACLE_STROKE = "rgba(255,255,255,0.5)";
-const GOAL_GLOW = "rgba(158, 255, 173, 0.92)";
-const GOAL_GLOW_SOFT = "rgba(158, 255, 173, 0.22)";
+const GOAL_FILL = "rgba(158, 255, 173, 0.16)";
+const GOAL_STROKE = "rgba(158, 255, 173, 0.92)";
 
 // ===== HELPERS =====
 function clamp(value: number, min: number, max: number): number {
@@ -292,52 +287,6 @@ function getSpeedMagnitude(player: Player): number {
   return Math.hypot(player.vx, player.vy);
 }
 
-function drawGoalGate(ctx: CanvasRenderingContext2D, goal: Rect, timeMs: number): void {
-  const pulse = 0.76 + ((Math.sin(timeMs / 320) + 1) * 0.5) * 0.32;
-  const railWidth = Math.max(8, goal.w * 0.12);
-  const leftX = goal.x + railWidth * 0.55;
-  const rightX = goal.x + goal.w - railWidth * 1.55;
-  const topY = goal.y + 8;
-  const gateHeight = goal.h - 16;
-  const beamGap = goal.w * 0.5;
-
-  ctx.save();
-  ctx.globalAlpha = 0.32 * pulse;
-  ctx.fillStyle = GOAL_GLOW_SOFT;
-  ctx.fillRect(goal.x - 10, goal.y - 10, goal.w + 20, goal.h + 20);
-  ctx.restore();
-
-  ctx.save();
-  ctx.shadowColor = GOAL_GLOW;
-  ctx.shadowBlur = 26 + pulse * 12;
-  ctx.fillStyle = GOAL_GLOW;
-  ctx.globalAlpha = 0.96;
-  ctx.fillRect(leftX, topY, railWidth, gateHeight);
-  ctx.fillRect(rightX, topY, railWidth, gateHeight);
-  ctx.restore();
-
-  ctx.save();
-  ctx.strokeStyle = GOAL_GLOW;
-  ctx.lineWidth = 3;
-  ctx.globalAlpha = 0.85;
-  ctx.strokeRect(goal.x + 6, goal.y + 6, goal.w - 12, goal.h - 12);
-  ctx.restore();
-
-  ctx.save();
-  ctx.strokeStyle = GOAL_GLOW;
-  ctx.lineWidth = 2;
-  ctx.globalAlpha = 0.22 + pulse * 0.18;
-  for (let i = 0; i < 4; i += 1) {
-    const t = ((timeMs / 520) + i * 0.24) % 1;
-    const y = goal.y + 10 + t * (goal.h - 20);
-    ctx.beginPath();
-    ctx.moveTo(goal.x + beamGap * 0.28, y);
-    ctx.lineTo(goal.x + goal.w - beamGap * 0.28, y - 10);
-    ctx.stroke();
-  }
-  ctx.restore();
-}
-
 // ===== MAIN APP =====
 export default function ShiftTheGravityApp(): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -352,11 +301,13 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
   const [isLandscape, setIsLandscape] = useState<boolean>(true);
   const [recenterTick, setRecenterTick] = useState<number>(0);
   const [lostOverlayVisible, setLostOverlayVisible] = useState<boolean>(false);
-  const [currentStageIndex] = useState<number>(INITIAL_STAGE_INDEX);
+  const [currentStageIndex, setCurrentStageIndex] = useState<number>(INITIAL_STAGE_INDEX);
 
   const currentStage = useMemo<StageDefinition>(() => {
     return STAGES[currentStageIndex] ?? STAGES[0];
   }, [currentStageIndex]);
+
+  const isLastStage = currentStageIndex >= STAGES.length - 1;
 
   const phaseRef = useRef<GamePhase>("idle");
   const pointerActiveRef = useRef<boolean>(false);
@@ -401,6 +352,11 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
   useEffect(() => {
     playerRef.current = makeInitialPlayer(currentStage.start);
     trailRef.current = [];
+    grazeEffectsRef.current = [];
+    impactEffectRef.current = null;
+    loopTimeRef.current = 0;
+    pointerActiveRef.current = false;
+    setLostOverlayVisible(false);
   }, [currentStage]);
 
   useEffect(() => {
@@ -476,7 +432,7 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
         updateEffects(deltaTime);
       }
 
-      drawScene(timestamp);
+      drawScene();
       rafId = window.requestAnimationFrame(stepAndDraw);
     };
 
@@ -630,6 +586,22 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
   function recenterTilt(): void {
     neutralTiltRef.current = getCurrentTiltDegrees();
     setRecenterTick(Date.now());
+  }
+
+  function goToStage(index: number): void {
+    if (loseTimeoutRef.current !== null) {
+      window.clearTimeout(loseTimeoutRef.current);
+      loseTimeoutRef.current = null;
+    }
+
+    pointerActiveRef.current = false;
+    setCurrentStageIndex(clamp(index, 0, STAGES.length - 1));
+    setGamePhase("idle");
+  }
+
+  function goToNextStage(): void {
+    if (isLastStage) return;
+    goToStage(currentStageIndex + 1);
   }
 
   function finishRun(nextPhase: Extract<GamePhase, "cleared">): void {
@@ -864,7 +836,7 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
     }
   }
 
-  function drawScene(timeMs: number): void {
+  function drawScene(): void {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -912,7 +884,13 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
     ctx.strokeRect(2, 2, WORLD_WIDTH - 4, WORLD_HEIGHT - 4);
     ctx.restore();
 
-    drawGoalGate(ctx, currentStage.goal, timeMs);
+    ctx.save();
+    ctx.fillStyle = GOAL_FILL;
+    ctx.strokeStyle = GOAL_STROKE;
+    ctx.lineWidth = 4;
+    ctx.fillRect(currentStage.goal.x, currentStage.goal.y, currentStage.goal.w, currentStage.goal.h);
+    ctx.strokeRect(currentStage.goal.x, currentStage.goal.y, currentStage.goal.w, currentStage.goal.h);
+    ctx.restore();
 
     currentStage.obstacles.forEach((obstacle: Rect) => {
       ctx.fillStyle = OBSTACLE_FILL;
@@ -999,7 +977,7 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
         <div className="mb-2 flex w-full items-center justify-between gap-3 px-1 text-[11px] text-white/70 md:mb-3 md:text-sm">
           <div>
             <span className="font-semibold text-white">Shift the gravity</span>
-            <span className="ml-2">試作版 v6.4</span>
+            <span className="ml-2">試作版 v6.5</span>
           </div>
           <div>
             {recenterTick > 0 && (
@@ -1035,7 +1013,7 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
                   長押しで浮かび、離すと落ちます。端末を傾けると、重力方向が左右に少しずれます。
                 </p>
                 <p className="mt-2 text-xs leading-5 text-white/55 md:text-sm">
-                  Stage: {currentStage.name}
+                  Stage {currentStageIndex + 1}: {currentStage.name}
                 </p>
 
                 {permissionMessage && (
@@ -1103,9 +1081,13 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
           {isLandscape && gamePhase === "cleared" && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/44 px-6 text-center">
               <div className="pointer-events-auto w-full max-w-md rounded-3xl border border-emerald-300/20 bg-slate-950/92 p-6 shadow-2xl md:p-8">
-                <div className="text-2xl font-semibold text-emerald-300 md:text-3xl">Good Job</div>
+                <div className="text-2xl font-semibold text-emerald-300 md:text-3xl">
+                  {isLastStage ? "Congratulations" : "Good Job"}
+                </div>
                 <p className="mt-3 text-sm leading-6 text-white/75">
-                  初版ステージをクリアしました。今は同じステージを再プレイできます。
+                  {isLastStage
+                    ? "すべてのステージをクリアしました。"
+                    : `Stage ${currentStageIndex + 1} をクリアしました。次のステージへ進めます。`}
                 </p>
                 <div className="mt-6 flex items-center justify-center gap-3">
                   <button
@@ -1120,12 +1102,14 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
                   >
                     Replay
                   </button>
-                  <button
-                    className="rounded-2xl border border-emerald-300/30 bg-emerald-300/10 px-6 py-3 text-sm font-medium text-emerald-200 transition hover:bg-emerald-300/15"
-                    onClick={startRun}
-                  >
-                    Play Again
-                  </button>
+                  {!isLastStage && (
+                    <button
+                      className="rounded-2xl border border-emerald-300/30 bg-emerald-300/10 px-6 py-3 text-sm font-medium text-emerald-200 transition hover:bg-emerald-300/15"
+                      onClick={goToNextStage}
+                    >
+                      Next Stage
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
