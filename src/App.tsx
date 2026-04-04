@@ -1,6 +1,6 @@
-// Shift the Gravity App.tsx v6.2
+// Shift the Gravity App.tsx v6.3
 // 2026-03-29
-// 変更点: 画面外に指がずれても推力が切れにくいよう、押し判定をゲーム画面外まで広げた。FAILED演出と物理は維持。
+// 変更点: フィールド内の「操作」「状態」を撤去。傾き代用スライダーを撤去。RecenterはStart前/FAILED後/CLEAR後のみに整理し、プレイ中の画面内ボタンをなくした。版表示のみ上部に残し、tilt表示も撤去。
 
 import React, { useEffect, useRef, useState } from "react";
 
@@ -92,7 +92,6 @@ const IMPACT_EFFECT_LIFE = 0.2;
 const LOST_DELAY_MS = 180;
 const LOST_FADE_MS = 120;
 
-const BG_COLOR = "#0b0f14";
 const FIELD_COLOR = "#101826";
 const GRID_COLOR = "rgba(255,255,255,0.05)";
 const BORDER_COLOR = "rgba(212, 232, 255, 0.48)";
@@ -105,8 +104,6 @@ const OBSTACLE_FILL = "#8b93a7";
 const OBSTACLE_STROKE = "rgba(255,255,255,0.5)";
 const GOAL_FILL = "rgba(158, 255, 173, 0.2)";
 const GOAL_STROKE = "#9effad";
-const HUD_PANEL = "rgba(16, 24, 38, 0.86)";
-const HUD_BORDER = "rgba(255,255,255,0.12)";
 
 // ===== HELPERS =====
 function clamp(value: number, min: number, max: number): number {
@@ -232,10 +229,6 @@ function makeInitialPlayer(): Player {
   };
 }
 
-function formatTiltText(value: number): string {
-  return `${value >= 0 ? "+" : ""}${value.toFixed(1)}°`;
-}
-
 function isDesktopLike(): boolean {
   if (typeof window === "undefined") return false;
   return window.matchMedia("(hover: hover) and (pointer: fine)").matches;
@@ -257,9 +250,6 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
   const [gamePhase, setGamePhase] = useState<GamePhase>("idle");
   const [permissionState, setPermissionState] = useState<PermissionState>("checking");
   const [isLandscape, setIsLandscape] = useState<boolean>(true);
-  const [manualTilt, setManualTilt] = useState<number>(0);
-  const [debugTilt, setDebugTilt] = useState<number>(0);
-  const [showManualTiltFallback, setShowManualTiltFallback] = useState<boolean>(false);
   const [recenterTick, setRecenterTick] = useState<number>(0);
   const [lostOverlayVisible, setLostOverlayVisible] = useState<boolean>(false);
 
@@ -270,10 +260,9 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
   const loopTimeRef = useRef<number>(0);
   const trailRef = useRef<Vec2[]>([]);
   const playerRef = useRef<Player>(makeInitialPlayer());
-  const latestDebugRef = useRef<number>(0);
 
   const supportsOrientation = typeof window !== "undefined" && !!getDeviceOrientationCtor();
-  const canStart = isLandscape && (permissionState === "granted" || showManualTiltFallback);
+  const canStart = isLandscape && permissionState === "granted";
 
   const screenUp: Vec2 = { x: 0, y: -1 };
   const rootStyle: React.CSSProperties = {
@@ -324,7 +313,6 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
   useEffect(() => {
     if (!supportsOrientation) {
       setPermissionState("unsupported");
-      setShowManualTiltFallback(true);
       return;
     }
 
@@ -333,10 +321,8 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
 
     if (hasRequestPermission) {
       setPermissionState("needs-request");
-      setShowManualTiltFallback(false);
     } else {
       setPermissionState("granted");
-      setShowManualTiltFallback(isDesktopLike());
     }
   }, [supportsOrientation]);
 
@@ -347,13 +333,12 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
 
     const handleOrientation = (event: DeviceOrientationEvent) => {
       sawOrientationEvent = true;
-      setShowManualTiltFallback(false);
       liveTiltRef.current = readRawTiltDegrees(event);
     };
 
     const fallbackTimer = window.setTimeout(() => {
-      if (!sawOrientationEvent && isDesktopLike()) {
-        setShowManualTiltFallback(true);
+      if (!sawOrientationEvent) {
+        setPermissionState(isDesktopLike() ? "unsupported" : "granted");
       }
     }, 1200);
 
@@ -387,7 +372,7 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
 
     rafId = window.requestAnimationFrame(stepAndDraw);
     return () => window.cancelAnimationFrame(rafId);
-  }, [manualTilt, permissionState]);
+  }, [permissionState]);
 
   useEffect(() => {
     if (recenterTick === 0) return;
@@ -431,15 +416,15 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
   }, []);
 
   function getCurrentTiltDegrees(): number {
-    return permissionState === "granted" && !showManualTiltFallback
-      ? liveTiltRef.current
-      : manualTilt;
+    return liveTiltRef.current;
   }
 
   function ensureAudioReady(): void {
     if (typeof window === "undefined") return;
 
-    const AudioCtor = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    const AudioCtor =
+      window.AudioContext ||
+      (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioCtor) return;
 
     if (!audioContextRef.current) {
@@ -635,7 +620,6 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
   async function handleEnableTilt(): Promise<void> {
     if (!supportsOrientation) {
       setPermissionState("unsupported");
-      setShowManualTiltFallback(true);
       return;
     }
 
@@ -647,14 +631,11 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
         const result = await requestPermission();
         const granted = result === "granted";
         setPermissionState(granted ? "granted" : "denied");
-        setShowManualTiltFallback(!granted && isDesktopLike());
       } else {
         setPermissionState("granted");
-        setShowManualTiltFallback(isDesktopLike());
       }
     } catch {
       setPermissionState("denied");
-      setShowManualTiltFallback(true);
     }
   }
 
@@ -663,7 +644,7 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
     ensureAudioReady();
     if (phaseRef.current !== "playing") return;
     const target = event.target as HTMLElement | null;
-    if (target?.closest("button") || target?.closest("input")) return;
+    if (target?.closest("button")) return;
     pointerActiveRef.current = true;
     window.getSelection()?.removeAllRanges();
   }
@@ -770,11 +751,6 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
       }
 
       maybeTriggerGraze(hitbox, player);
-
-      if (performance.now() - latestDebugRef.current > 80) {
-        latestDebugRef.current = performance.now();
-        setDebugTilt(clampedInputDeg);
-      }
     }
   }
 
@@ -844,9 +820,8 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
       ctx.strokeRect(obstacle.x, obstacle.y, obstacle.w, obstacle.h);
     });
 
-    const trail = trailRef.current;
-    trail.forEach((point: Vec2, index: number) => {
-      const ratio = (index + 1) / trail.length;
+    trailRef.current.forEach((point: Vec2, index: number) => {
+      const ratio = (index + 1) / trailRef.current.length;
       const size = 5 + ratio * 6;
       ctx.fillStyle = PLAYER_TRAIL_COLOR;
       ctx.fillRect(point.x - size / 2, point.y - size / 2, size, size);
@@ -904,11 +879,9 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
     permissionState === "needs-request"
       ? "iPhone / iPad では最初に傾き許可が必要です。"
       : permissionState === "denied"
-      ? "傾き許可が取れなかったため、下のスライダーで傾きを代用できます。"
+      ? "傾き許可が取れませんでした。"
       : permissionState === "unsupported"
-      ? "この環境では傾きセンサーが使えないため、下のスライダーで確認できます。"
-      : showManualTiltFallback
-      ? "この環境では実センサー入力が来ていないため、下のスライダーで確認できます。"
+      ? "この環境では傾きセンサーが使えません。"
       : "";
 
   return (
@@ -924,17 +897,14 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
         <div className="mb-2 flex w-full items-center justify-between gap-3 px-1 text-[11px] text-white/70 md:mb-3 md:text-sm">
           <div>
             <span className="font-semibold text-white">Shift the gravity</span>
-            <span className="ml-2">試作版 v6.2</span>
+            <span className="ml-2">試作版 v6.3</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div>
             {recenterTick > 0 && (
               <div className="rounded-full border border-emerald-300/20 bg-emerald-300/10 px-2 py-1 text-[10px] text-emerald-200 md:text-xs">
                 recentered
               </div>
             )}
-            <div className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
-              tilt {formatTiltText(debugTilt)}
-            </div>
           </div>
         </div>
 
@@ -943,45 +913,6 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
           style={gameFrameStyle}
         >
           <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
-
-          <div className="absolute left-2 top-2 right-2 flex items-start justify-between gap-2 md:left-4 md:top-4 md:right-4 md:gap-3">
-            <div
-              className="pointer-events-none rounded-2xl border px-2 py-1.5 text-[10px] md:px-3 md:py-2 md:text-sm"
-              style={{ background: HUD_PANEL, borderColor: HUD_BORDER }}
-            >
-              <div className="font-semibold text-white">操作</div>
-              <div className="mt-1 text-white/80">長押しで推力 / 離すと落下</div>
-              <div className="text-white/80">端末を傾けると重力方向が少しずれます</div>
-            </div>
-
-            <div className="flex items-start gap-2">
-              {gamePhase === "playing" && (
-                <button
-                  className="pointer-events-auto rounded-2xl border border-cyan-300/25 bg-cyan-300/10 px-3 py-2 text-[10px] font-medium text-cyan-100 transition hover:bg-cyan-300/15 md:text-sm"
-                  onClick={recenterTilt}
-                >
-                  Recenter
-                </button>
-              )}
-              <div
-                className="pointer-events-none rounded-2xl border px-2 py-1.5 text-right text-[10px] md:px-3 md:py-2 md:text-sm"
-                style={{ background: HUD_PANEL, borderColor: HUD_BORDER }}
-              >
-                <div className="font-semibold text-white">状態</div>
-                <div className="mt-1 text-white/80">
-                  {gamePhase === "playing"
-                    ? "Playing"
-                    : gamePhase === "impact"
-                    ? "Impact"
-                    : gamePhase === "lost"
-                    ? "FAILED"
-                    : gamePhase === "cleared"
-                    ? "Good Job"
-                    : "Ready"}
-                </div>
-              </div>
-            </div>
-          </div>
 
           {!isLandscape && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/82 px-6 text-center">
@@ -1015,6 +946,13 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
                       傾き操作を有効にする
                     </button>
                   )}
+                  <button
+                    className="rounded-2xl border border-cyan-300/25 bg-cyan-300/10 px-5 py-3 text-sm font-medium text-cyan-100 transition hover:bg-cyan-300/15 disabled:cursor-not-allowed disabled:opacity-40"
+                    onClick={recenterTilt}
+                    disabled={!canStart}
+                  >
+                    Recenter
+                  </button>
                   <button
                     className="rounded-2xl border border-white/20 bg-white/10 px-6 py-3 text-sm font-medium text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-40"
                     onClick={startRun}
@@ -1088,33 +1026,6 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
             </div>
           )}
         </div>
-
-        {showManualTiltFallback && (
-          <div className="mt-2 w-full max-w-4xl rounded-3xl border border-white/10 bg-slate-950/90 p-3 shadow-xl md:mt-4 md:p-4">
-            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between md:gap-3">
-              <div>
-                <div className="text-sm font-semibold text-white">傾き代用スライダー</div>
-                <div className="mt-1 text-xs leading-5 text-white/65 md:text-sm">
-                  PCプレビューや傾き未許可時は、ここで重力方向のずれを確認できます。
-                </div>
-              </div>
-              <div className="text-sm text-white/70">
-                {formatTiltText(manualTilt - neutralTiltRef.current)}
-              </div>
-            </div>
-            <input
-              className="mt-3 w-full"
-              type="range"
-              min={-30}
-              max={30}
-              step={0.1}
-              value={manualTilt}
-              onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
-                setManualTilt(Number(event.target.value))
-              }
-            />
-          </div>
-        )}
       </div>
     </div>
   );
