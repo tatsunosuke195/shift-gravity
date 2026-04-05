@@ -1,8 +1,6 @@
-
-
-// Shift the Gravity App.tsx v6.5
+// Shift the Gravity App.tsx v6.6
 // 2026-03-29
-// 変更点: ゴールを静かな四角に戻した。currentStageIndex を更新できるようにし、クリア時に Next Stage を実装。最終ステージのみ Congratulations を表示し、Replay は常に現在のステージをやり直す形に整理。
+// 変更点: 最終面クリア時に Back to Stage 1 を追加。STAGES に追加用テンプレコメントも残して、今後のステージ追加をしやすくした。
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
@@ -75,6 +73,16 @@ const PLAYER_SIZE = 24;
 const PLAYER_HITBOX_SCALE = 0.76;
 
 const STAGES: StageDefinition[] = [
+  // --- stage template ---
+  // {
+  //   id: "stage-x",
+  //   name: "Stage-X",
+  //   start: { x: 200, y: 200 },
+  //   goal: { x: 1200, y: 120, w: 120, h: 120 },
+  //   obstacles: [
+  //     { x: 400, y: 200, w: 120, h: 320 },
+  //   ],
+  // },
   {
     id: "stage-1",
     name: "Stage-1",
@@ -979,7 +987,7 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
         <div className="mb-2 flex w-full items-center justify-between gap-3 px-1 text-[11px] text-white/70 md:mb-3 md:text-sm">
           <div>
             <span className="font-semibold text-white">Shift the gravity</span>
-            <span className="ml-2">試作版 v6.5</span>
+            <span className="ml-2">試作版 v6.6</span>
           </div>
           <div>
             {recenterTick > 0 && (
@@ -1110,6 +1118,14 @@ export default function ShiftTheGravityApp(): React.JSX.Element {
                       onClick={goToNextStage}
                     >
                       Next Stage
+                    </button>
+                  )}
+                  {isLastStage && (
+                    <button
+                      className="rounded-2xl border border-emerald-300/30 bg-emerald-300/10 px-6 py-3 text-sm font-medium text-emerald-200 transition hover:bg-emerald-300/15"
+                      onClick={() => goToStage(0)}
+                    >
+                      Back to Stage 1
                     </button>
                   )}
                 </div>
